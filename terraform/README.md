@@ -1,35 +1,3 @@
-# Terraform Infrastructure as Code
-
-This directory contains the Terraform configuration templates for deploying the OpenJII application to AWS.
-
-
-## Basic Monitoring Requirements
-
-Your infrastructure should include basic monitoring:
-
-- Health checks for the application
-- Resource utilization monitoring
-- Simple alerting for critical conditions
-
-AWS CloudWatch is sufficient for this requirement - no need to implement complex monitoring solutions.
-
-## Deliverables
-
-Your solution should include:
-
-1. Complete Terraform configuration files
-2. Brief comments explaining key design decisions
-3. Instructions for applying the configuration
-
-## Documentation
-
-In your README or comments, briefly address:
-
-- Architecture overview
-- Security considerations
-- How to apply your Terraform configuration
-
-
 # Modular AWS Infrastructure with Terraform
 
 This repository provides a modular and scalable framework for provisioning an application architecture on AWS using Terraform. The setup includes networking, compute resources, application load balancing, security configurations, and monitoring, enabling efficient deployment of a containerized application in the cloud.
