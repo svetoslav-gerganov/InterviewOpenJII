@@ -1,4 +1,4 @@
-name: CI/CD Pipeline for Dev Environment-first
+name: CI/CD Pipeline for Dev Environment
 
 on:
   workflow_dispatch:
