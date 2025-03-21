@@ -1,0 +1,97 @@
+name: Terraform Infrastructure Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Select the environment to destroy (dev, stage, prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - stage
+          - prod
+      confirmation:
+        description: 'Type "PROD_DESTROY" to confirm destruction of the production environment'
+        required: false  # Optional for non-prod environments
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  terraform-destroy:
+    runs-on: ubuntu-latest
+    name: Terraform Infrastructure Destroy
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./terraform  # Specify the Terraform directory
+    steps:
+      - name: Fail if Confirmation is Missing for Production
+        if: ${{ github.event.inputs.environment == 'prod' && github.event.inputs.confirmation != 'PROD_DESTROY' }}
+        run: |
+          echo "ERROR: Confirmation not provided or incorrect. Exiting to prevent destruction of the production environment."
+          exit 1
+
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.0
+
+      - name: Set Environment Variables
+        run: |
+          echo "Setting environment variables for ${GITHUB_EVENT_INPUTS_ENVIRONMENT} environment"
+          if [[ "${{ github.event.inputs.environment }}" == "dev" ]]; then
+            echo "Setting up Dev environment"
+            echo "TF_VAR_environment=dev" >> $GITHUB_ENV
+            echo "BACKEND_CONFIG=./backend-config/dev-backend.conf" >> $GITHUB_ENV
+          elif [[ "${{ github.event.inputs.environment }}" == "stage" ]]; then
+            echo "Setting up Stage environment"
+            echo "TF_VAR_environment=stage" >> $GITHUB_ENV
+            echo "BACKEND_CONFIG=./backend-config/stage-backend.conf" >> $GITHUB_ENV
+          elif [[ "${{ github.event.inputs.environment }}" == "prod" ]]; then
+            echo "Setting up Prod environment"
+            echo "TF_VAR_environment=prod" >> $GITHUB_ENV
+            echo "BACKEND_CONFIG=./backend-config/prod-backend.conf" >> $GITHUB_ENV
+          else
+            echo "Unknown environment, setting default as dev"
+            echo "TF_VAR_environment=dev" >> $GITHUB_ENV
+            echo "BACKEND_CONFIG=./backend-config/dev-backend.conf" >> $GITHUB_ENV
+          fi
+
+      - name: Initialize Terraform
+        run: |
+          echo "Initializing Terraform for destroy in environment ${TF_VAR_environment}..."
+          terraform init -backend-config="${BACKEND_CONFIG}"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Destroy Plan
+        run: |
+          echo "Generating Terraform destroy plan for ${TF_VAR_environment}..."
+          terraform plan -destroy -out=destroy-${{ github.run_id }}.tfplan
+          terraform show destroy-${{ github.run_id }}.tfplan
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Upload Terraform Destroy Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-destroy-plan-${{ github.run_id }}
+          path: ./terraform/destroy-${{ github.run_id }}.tfplan
+
+      - name: Apply Terraform Destroy
+        run: terraform apply -auto-approve destroy-${{ github.run_id }}.tfplan
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

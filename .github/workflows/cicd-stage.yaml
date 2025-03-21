@@ -1,0 +1,139 @@
+name: CI/CD Pipeline for Stage Environment
+
+on:
+  workflow_dispatch:  # Manually trigger the workflow from the GitHub UI
+# on:                                                                     
+#   pull_request: # Trigger the pipeline on pull requests to the prod branch                                    
+#     branches: 
+#       - prod                                            
+#     types:
+#       - opened   # Trigger the pipeline when a new pull request is opened, edited, or updated
+#       - edited
+#       - synchronized  
+#     paths:
+#       - "**"    # Trigger the pipeline when any file in the repository is changed
+
+permissions:
+  contents: read                                                            # Minimum required for accessing repository content
+  actions: write                                                            # Example: Allow writing to GitHub Actions
+
+jobs:
+  fetch-run-id:
+    runs-on: ubuntu-latest
+    name: Fetch Run ID of CICD Dev Workflow
+    environment: Stage                                                      # Set the environment to Stage. This is optional but recommended for clarity and organization of local variables              
+    outputs:
+      docker_image: ${{ steps.set_docker_image.outputs.docker_image }}      # Output the Docker image tag for reuse in other jobs
+    
+    steps:
+      - name: Get latest run ID of CICD Dev Workflow
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}                               # Use the GitHub PAT to authenticate
+        run: |
+          echo "Fetching the latest run ID of CICD Dev Workflow ..."
+          workflow_dev_id=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+          "https://api.github.com/repos/svetoslav-gerganov/Interview/actions/workflows/cicd-dev.yaml/runs?status=completed&per_page=1" \
+          | jq -r '.workflow_runs[] | select(.conclusion == "success") | .id' | head -n 1)
+
+          echo "WORKFLOW_DEV_RUN_ID=$workflow_dev_id" >> $GITHUB_ENV
+
+      - name: Use Workflow Dev Run ID
+        run: echo "The run ID of Dev Workflow is $WORKFLOW_DEV_RUN_ID"
+
+      - name: Download Docker Image Tag Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-tag-${{ env.WORKFLOW_DEV_RUN_ID }}               # Use the Docker image tag artifact from the previous job. Add unique identifier for the artifact name
+          github-token: ${{ secrets.GH_PAT }}                                 # Token with actions:read permissions
+          repository: ${{ github.repository }}                                # Get the current repository
+          run-id: ${{ env.WORKFLOW_DEV_RUN_ID }}                              # Use the Workflow Dev run ID
+
+      - name: Set Docker Image Variable from Artifact 
+        id: set_docker_image
+        run: |
+          echo "Setting Docker image environment variable..."
+          DOCKER_IMAGE=$(cat ./docker-image-tag.txt)                          # Read Docker image tag from the artifact
+          echo "docker_image=${DOCKER_IMAGE}" >> $GITHUB_OUTPUT               # Set as output 
+          echo "DOCKER_IMAGE=${DOCKER_IMAGE}" >> $GITHUB_ENV                  # Set as an environment variable
+        env:
+          DOCKER_IMAGE: ""                                                    # Initialize the Docker image variable (empty)                
+
+      - name: Check Docker Image Variable in Terraform Job
+        run: |
+          echo "Docker Image in Terraform job contains: $DOCKER_IMAGE"        # Check the Docker image variable, simple echo for verification
+
+  terraform:
+    runs-on: ubuntu-latest
+    needs: fetch-run-id
+    name: Terraform Infrastructure Management
+    environment: Stage
+    env:
+      DOCKER_IMAGE: ${{ needs.fetch-run-id.outputs.docker_image }}            # Use the Docker image tag output from the previous job
+    
+    steps:
+      - name: Access Docker Image Variable from Previous Job
+        run: |
+          echo "Docker Image in Fetch Run ID job contains: ${{ env.DOCKER_IMAGE }}"
+
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Terraform                                                # Set up Terraform with the specified version for consistency
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.0
+
+      - name: Initialize Terraform                                            # Initialize Terraform with the backend configuration
+        run: |
+          echo "Initializing Terraform..."
+          terraform init -backend-config="./backend-config/stage-backend.conf"
+        shell: bash                                                            # Use bash shell
+        working-directory: ./terraform                                         # Specify the Terraform directory         
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Format Terraform Files                                           # Format Terraform files for consistency
+        run: terraform fmt -recursive
+        shell: bash
+        working-directory: ./terraform
+
+      - name: Check Terraform Formatting                                       # Check Terraform formatting
+        id: fmt
+        run: terraform fmt -check
+        shell: bash
+        working-directory: ./terraform
+
+      - name: Validate Terraform Configuration                                  # Validate Terraform configuration
+        id: validate
+        run: terraform validate
+        shell: bash
+        working-directory: ./terraform
+
+      - name: Plan Terraform Changes                                            # Generate Terraform plan with Docker image and "environment" variable for code reuse. Output the plan and then reuse it for apply.
+        run: |
+          echo "Generating Terraform plan... (STAGE)"
+          terraform plan -var "docker_image=${{ env.DOCKER_IMAGE }}" -var "environment=Stage" -out=plan-stage-${{ github.run_id }}.tfplan
+        shell: bash
+        working-directory: ./terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Upload Terraform Plan                                               # Upload the Terraform plan as an artifact for later use, if needed               
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-stage-${{ github.run_id }}                          # Name the artifact with the run ID for uniqueness
+          path: ./terraform/plan-stage-${{ github.run_id }}.tfplan
+
+      - name: Check Docker Image Variable in Terraform Plan                       # Check the Docker image variable in the Terraform job       
+        run: |
+          echo "Docker Image used in Terraform Plan: ${{ env.DOCKER_IMAGE }}"
+
+      - name: Apply Terraform Changes                                             # Apply the Terraform plan to create/update the infrastructure in the Stage environment
+        run: terraform apply -var "docker_image=${{ env.DOCKER_IMAGE }}" -var "environment=Stage" -auto-approve plan-stage-${{ github.run_id }}.tfplan
+        shell: bash
+        working-directory: ./terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
