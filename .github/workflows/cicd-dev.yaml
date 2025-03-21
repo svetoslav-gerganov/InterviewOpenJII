@@ -3,17 +3,16 @@ name: CI/CD Pipeline for Dev Environment
 on:
   workflow_dispatch:
    
-# on:
-#   pull_request: # Trigger the pipeline on pull requests to the dev branch
-#     branches:
-#       - main
-#       - dev
-#     types:
-#       - opened   # Trigger the pipeline when a new pull request is opened, edited, or updated
-#       - edited
-#       - synchronized  
-#     paths:
-#       - "**"    # Trigger the pipeline when any file in the repository is changed
+on:
+  pull_request: # Trigger the pipeline on pull requests to the dev branch
+    branches:
+      - dev
+    types:
+      - opened   # Trigger the pipeline when a new pull request is opened, edited, or updated
+      - edited
+      - synchronized  
+    paths:
+      - "**"    # Trigger the pipeline when any file in the repository is changed
 
 permissions:
   contents: read                                                                      # Minimum required for accessing repository content
