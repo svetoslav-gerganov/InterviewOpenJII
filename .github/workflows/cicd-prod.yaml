@@ -2,10 +2,11 @@ name: CI/CD Pipeline for Production Environment
 
 on:
   workflow_dispatch:  # Manually trigger the workflow from the GitHub UI
+
 # on:                                                                     
 #   pull_request: # Trigger the pipeline on pull requests to the prod branch                                    
 #     branches: 
-#       - prod                                            
+#       - main                                            
 #     types:
 #       - opened   # Trigger the pipeline when a new pull request is opened, edited, or updated
 #       - edited
